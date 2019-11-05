@@ -97,6 +97,7 @@ def run():
         image = images.data.get()[0].transpose((1, 2, 0))
         scipy.misc.toimage(image, cmin=0, cmax=1).save('%s/_tmp_%04d.png' % (directory_output, num))
     make_gif(directory_output, args.filename_output)
+    print(model.getLosses())
 
 
 if __name__ == '__main__':

@@ -110,6 +110,9 @@ class StyleTransferModel(chainer.Chain):
         masks = masks.data == 1
         return cf.sum(masks * (s1 + s2))
 
+    def getLosses(self):
+        return self.loss_content, self.loss_style, self.loss_tv
+
     def __call__(self, batch_size):
         xp = self.xp
 
@@ -136,10 +139,10 @@ class StyleTransferModel(chainer.Chain):
         # IPython.embed()
         features = self.extract_style_feature(images, masks)
 
-        loss_style = self.compute_style_loss(features)
-        loss_content = self.compute_content_loss()
-        loss_tv = self.compute_tv_loss(images, masks)
-        loss = self.lambda_style * loss_style + self.lambda_content * loss_content + self.lambda_tv * loss_tv
+        self.loss_style = self.compute_style_loss(features)
+        self.loss_content = self.compute_content_loss()
+        self.loss_tv = self.compute_tv_loss(images, masks)
+        loss = self.lambda_style * self.loss_style + self.lambda_content * self.loss_content + self.lambda_tv * self.loss_tv
 
         # set default lighting direction
         self.renderer.light_direction = [0, 1, 0]
