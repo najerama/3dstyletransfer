@@ -31,6 +31,7 @@ def run():
     parser.add_argument('-im', '--filename_mesh', type=str)
     parser.add_argument('-is', '--filename_style', type=str)
     parser.add_argument('-o', '--filename_output', type=str)
+    parser.add_argument('-o_loss', '--output_loss', type=str, default="/tmp/a.npy")
     parser.add_argument('-ls', '--lambda_style', type=float, default=1.)
     parser.add_argument('-lc', '--lambda_content', type=float, default=2e9)
     parser.add_argument('-ltv', '--lambda_tv', type=float, default=1e7)
@@ -78,14 +79,30 @@ def run():
     optimizer = neural_renderer.Adam(alpha=args.adam_lr, beta1=args.adam_beta1)
     optimizer.setup(model)
 
+    losses = {
+        "style": np.empty(0),
+        "content": np.empty(0),
+        "tv": np.empty(0),
+        "overall": np.empty(0),
+    }
+
     # optimization
     loop = tqdm.tqdm(range(args.num_iteration))
     for _ in loop:
         optimizer.target.cleargrads()
-        loss = model(args.batch_size)
+        loss, style_loss, content_loss, tv_loss = model(args.batch_size)
         loss.backward()
         optimizer.update()
-        loop.set_description('Optimizing. Loss %.4f' % loss.data)
+        loop.set_description('Optimizing. Loss %.4f, Style Loss %.4f, Content loss %.4f, TV Loss %.4f' % (loss.data, style_loss.data, content_loss.data, tv_loss.data))
+        
+        losses["style"] = np.append(losses["style"], cp.asnumpy(style_loss.data))
+        losses["content"] = np.append(losses["content"], cp.asnumpy(content_loss.data))
+        losses["tv"] = np.append(losses["tv"], cp.asnumpy(tv_loss.data))
+        losses["overall"] = np.append(losses["overall"], cp.asnumpy(loss.data))
+    
+    print("Dumping losses to file ", args.output_loss)
+    np.save(args.output_loss, losses)
+
 
     # draw object
     model.renderer.background_color = (1, 1, 1)
@@ -100,4 +117,4 @@ def run():
 
 
 if __name__ == '__main__':
-    run()
+    losses = run()

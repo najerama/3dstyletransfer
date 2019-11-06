@@ -144,4 +144,4 @@ class StyleTransferModel(chainer.Chain):
         # set default lighting direction
         self.renderer.light_direction = [0, 1, 0]
 
-        return loss
+        return loss, loss_style, loss_content, loss_tv
