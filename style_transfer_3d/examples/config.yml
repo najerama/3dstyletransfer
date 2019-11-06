@@ -1,0 +1,13 @@
+## Specify a list of content files (c) and a list of style files (s), then it will execute a run c x d files and return | time for execution | style loss | content loss | tv loss
+
+
+content_fns : [bunny,teapot]
+style_fns : [simpsons1,fungai1,perry1,new_york1,lichtenstein1]
+data_dir : ./examples/data
+
+out_dir : ./examples/results
+lc : 2000000000
+ltv : 100000
+
+#python ./examples/run.py -im ${DIR}/meshes/teapot.obj -is ${DIR}/styles/diebenkorn1.jpg -o ${DIR}/results/teapot_gris.gif -lc 2000000000 -ltv 10000
+#python ./examples/run.py -im ${DIR}/meshes/bunny.obj -is ${DIR}/styles/simpsons1.jpg -o ${DIR}/results/bunny_munch.gif -lc 2000000000 -ltv 100000
