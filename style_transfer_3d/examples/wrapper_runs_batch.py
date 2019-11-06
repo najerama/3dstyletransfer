@@ -28,6 +28,7 @@ def main(args):
             row = cn+"_"+sn
             if row in idx:
                 print("Skipping %s as already exists" %(row))
+                
                 continue    
             t = time()
             #print(subprocess.call('python ./examples/run.py -im %s.obj -is %s.jpg -o %s.gif -lc %d -ltv %d' % (cf,sf,pjoin(args.out_dir,row),args.lc,args.ltv) ,shell=True))
