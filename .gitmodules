@@ -1,0 +1,3 @@
+[submodule "deepvoxels/pytorch_prototyping"]
+	path = deepvoxels/pytorch_prototyping
+	url = https://github.com/vsitzmann/pytorch_prototyping.git

@@ -297,7 +297,7 @@ def train():
 
             iter += 1
 
-            if iter % 10000 == 0:
+            if iter % 100 == 0:
                 util.custom_save(model,
                                  os.path.join(log_dir, 'model-epoch_%d_iter_%s.pth' % (epoch, iter)),
                                  discriminator)
