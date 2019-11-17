@@ -111,7 +111,7 @@ class StyleTransferModel(chainer.Chain):
         return cf.sum(masks * (s1 + s2))
 
     def getLosses(self):
-        return self.loss_content, self.loss_style, self.loss_tv
+        return self.loss_content, self.loss_style, self.loss_tv, self.lambda_style * self.loss_style + self.lambda_content * self.loss_content + self.lambda_tv * self.loss_tv
 
     def __call__(self, batch_size):
         xp = self.xp
