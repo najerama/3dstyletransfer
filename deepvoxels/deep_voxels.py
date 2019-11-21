@@ -85,7 +85,7 @@ class DeepVoxels(nn.Module):
                 self.norm(self.nf0),
                 nn.ReLU(True),
             )
-            print(self.frustrum_collapse_net)
+            print(self.depth_collapse_net)
 
         # The deepvoxels grid is registered as a buffer - meaning, it is safed together with model parameters, but is
         # not trainable.
@@ -132,7 +132,8 @@ class DeepVoxels(nn.Module):
                 proj_grid_coords_list,
                 lift_volume_idcs,
                 lift_img_coords,
-                writer):
+                writer,
+                dv=None):
         if input_img is not None:
             # Training mode: Extract features from input img, lift them, and update the deepvoxels volume.
             img_feats = self.feature_extractor(input_img)
@@ -142,7 +143,10 @@ class DeepVoxels(nn.Module):
             self.deepvoxels.data = dv_new
         else:
             # Testing mode: Use the pre-trained deepvoxels volume.
-            dv_new = self.deepvoxels
+            if dv is not None:
+                dv_new = dv
+            else:
+                dv_new = self.deepvoxels
 
         inpainting_input = torch.cat([dv_new, self.coord_conv_volume], dim=1)
         dv_inpainted = self.inpainting_net(inpainting_input)

@@ -107,3 +107,8 @@ venv.bak/
 
 # Custom:
 deepvoxels/logs/*
+deepvoxels-data/logs/*
+deepvoxels-data/synthetic_scene/*
+setup.sh
+useful_scripts.sh
+.vscode/*
