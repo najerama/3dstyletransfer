@@ -12,7 +12,7 @@ import edu.stanford.graphics.shapenet.jme3.loaders.LoadFormat
  * @author Angel Chang
  */
 class ViewerConfig(config: Config) extends ConfigManager(config) {
-  val defaultModelId = getString("viewer.defaultModelId", "3dw.111cb08c8121b8411749672386e0b711")
+  val defaultModelId = getString("viewer.defaultModelId", "")
   val shapeNetCoreDir = getString("viewer.shapeNetCoreDir")
   val width = Option(getIntOption("viewer.width").getOrElse(1024))
   val height = Option(getIntOption("viewer.height").getOrElse(768))
@@ -34,8 +34,8 @@ class ViewerConfig(config: Config) extends ConfigManager(config) {
   // Mutable configuration
   var useShadow = getBoolean("viewer.useShadow", false)
 
-  var defaultSceneDistanceScale = getFloat("viewer.sceneDistanceScale", 1.0f)
-  var defaultModelDistanceScale = getFloat("viewer.modelDistanceScale", 2.0f)
+  var defaultSceneDistanceScale = getFloat("viewer.sceneDistanceScale", 0.5f)
+  var defaultModelDistanceScale = getFloat("viewer.modelDistanceScale", 3.0f)
   registerMutable[Float]("defaultModelDistanceScale", "Distance factor away from model",
     x => defaultModelDistanceScale, s => defaultModelDistanceScale = s.toFloat)
 

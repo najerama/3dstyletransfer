@@ -27,9 +27,6 @@ class DataManager extends CombinedModelsDb("DataManager") {
     if (!modelInfo.isDefined) {
       modelInfo = super.getModelInfo(modelId)
     }
-    if (!modelInfo.isDefined) {
-      modelInfo = getModelInfoFromSolr(modelId)
-    }
     modelInfo
   }
   override def getModelLoadOptions(fullId:FullId, format:String): ModelLoadOptions = {
