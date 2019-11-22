@@ -100,7 +100,7 @@ projection = ProjectionHelper(
 )
 
 # Style Transfer Model
-stm = StyleTransferModel(opt.style_image_path)
+stm = StyleTransferModel(opt.style_image_path, (opt.img_sidelength, opt.img_sidelength))
 # Generating an image from trained checkpoint and projection file
 
 dataset = TestDataset(pose_dir=os.path.join(opt.data_root, 'pose'))
@@ -153,7 +153,7 @@ def get_images_from_poses(trgt_poses):
     return output
 
 # Utility Function
-def normalize_images(imgs):
+def denormalize_images(imgs):
     output_imgs = imgs + 0.5
     output_imgs *= 255
     output_imgs = output_imgs.round()
@@ -168,17 +168,17 @@ def concate_images(images):
     return concatenated_images
     
 # Utility Function
-def invert_channels(image):
-    inv_index = torch.arange(image.size(0)-1, -1, -1).long()
-    return image[inv_index]
+def invert_channels(images):
+    inv_index = torch.arange(images.size(1)-1, -1, -1).long()
+    return images[:, inv_index, :, :]
 
 with torch.no_grad():
     trgt_poses_indices = sample(range(len(dataset)), batch_size)
     trgt_poses = torch.cat([dataset[i].unsqueeze(dim=0) for i in trgt_poses_indices])
     output_images = get_images_from_poses(trgt_poses)
-    output_images = normalize_images(output_images.detach().cpu())
+    output_images = invert_channels(output_images)
+    output_images = denormalize_images(output_images.detach().cpu())
     concatenated_images = concate_images(output_images)
-    concatenated_images = invert_channels(concatenated_images)
     writer.add_image("Initial-Rendered-Images", concatenated_images, 0)
 
 # Train
@@ -186,7 +186,7 @@ for epoch in range(opt.num_iterations):
     print(f"Epoch: {epoch}")
     for batch_num, trgt_poses in enumerate(tqdm(dataloader)):
         output_images = get_images_from_poses(trgt_poses)
-        
+        output_images = invert_channels(output_images)
         style_features = stm.extract_style_features(output_images)
         style_loss = stm.get_style_loss(style_features)
         writer.add_scalar("Style-Loss", style_loss.item(), batch_num)
@@ -195,7 +195,7 @@ for epoch in range(opt.num_iterations):
         optimizer.step()
         
         writer.add_scalar("Overall-DV-SSE", torch.sum((dv.detach() - model.deepvoxels.detach())**2), batch_num)
-        output_images = normalize_images(output_images.detach().cpu())
-        concatenated_images = invert_channels(concate_images(output_images))
+        output_images = denormalize_images(output_images.detach().cpu())
+        concatenated_images = concate_images(output_images)
         writer.add_image("Rendered-Images", concatenated_images, batch_num)
 writer.close()
