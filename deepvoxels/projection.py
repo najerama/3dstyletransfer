@@ -279,14 +279,26 @@ def interpolate_trilinear(grid, lin_ind_frustrum, voxel_coords, img_shape, frust
 
     # output = torch.zeros(batch, num_feats, img_shape[0]*img_shape[1]*depth).cuda()
     output = torch.zeros(batch, num_feats, img_shape[0] * img_shape[1] * frustrum_depth).cuda()
-    output[:, :, lin_ind_frustrum] += grid[:, :, x0, y0, z0] * (1 - x) * (1 - y) * (1 - z)
-    output[:, :, lin_ind_frustrum] += grid[:, :, x1, y0, z0] * x * (1 - y) * (1 - z)
-    output[:, :, lin_ind_frustrum] += grid[:, :, x0, y1, z0] * (1 - x) * y * (1 - z)
-    output[:, :, lin_ind_frustrum] += grid[:, :, x0, y0, z1] * (1 - x) * (1 - y) * z
-    output[:, :, lin_ind_frustrum] += grid[:, :, x1, y0, z1] * x * (1 - y) * z
-    output[:, :, lin_ind_frustrum] += grid[:, :, x0, y1, z1] * (1 - x) * y * z
-    output[:, :, lin_ind_frustrum] += grid[:, :, x1, y1, z0] * x * y * (1 - z)
-    output[:, :, lin_ind_frustrum] += grid[:, :, x1, y1, z1] * x * y * z
+    # output[:, :, lin_ind_frustrum] += grid[:, :, x0, y0, z0] * (1 - x) * (1 - y) * (1 - z)
+    # output[:, :, lin_ind_frustrum] += grid[:, :, x1, y0, z0] * x * (1 - y) * (1 - z)
+    # output[:, :, lin_ind_frustrum] += grid[:, :, x0, y1, z0] * (1 - x) * y * (1 - z)
+    # output[:, :, lin_ind_frustrum] += grid[:, :, x0, y0, z1] * (1 - x) * (1 - y) * z
+    # output[:, :, lin_ind_frustrum] += grid[:, :, x1, y0, z1] * x * (1 - y) * z
+    # output[:, :, lin_ind_frustrum] += grid[:, :, x0, y1, z1] * (1 - x) * y * z
+    # output[:, :, lin_ind_frustrum] += grid[:, :, x1, y1, z0] * x * y * (1 - z)
+    # output[:, :, lin_ind_frustrum] += grid[:, :, x1, y1, z1] * x * y * z
+    
+    # Note: above code was not working as pytorch autograd does not allow inplace operation.
+    output[:, :, lin_ind_frustrum] =\
+        output[:, :, lin_ind_frustrum] +\
+            grid[:, :, x0, y0, z0] * (1 - x) * (1 - y) * (1 - z) +\
+                grid[:, :, x1, y0, z0] * x * (1 - y) * (1 - z) +\
+                    grid[:, :, x0, y1, z0] * (1 - x) * y * (1 - z) +\
+                        grid[:, :, x0, y0, z1] * (1 - x) * (1 - y) * z +\
+                            grid[:, :, x1, y0, z1] * x * (1 - y) * z +\
+                                grid[:, :, x0, y1, z1] * (1 - x) * y * z +\
+                                    grid[:, :, x1, y1, z0] * x * y * (1 - z) +\
+                                        grid[:, :, x1, y1, z1] * x * y * z
 
     output = output.contiguous().view(batch, num_feats, frustrum_depth, img_shape[0], img_shape[1])
 
