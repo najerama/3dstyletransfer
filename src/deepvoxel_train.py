@@ -8,6 +8,10 @@ from tqdm import tqdm
 import cv2
 from torch.utils.data import DataLoader
 from torch import optim
+from tensorboardX import SummaryWriter
+from PIL import Image
+from random import sample
+import pytz
 from deepvoxels.projection import ProjectionHelper
 from deepvoxels.dataio import TestDataset
 from deepvoxels.deep_voxels import DeepVoxels
@@ -52,15 +56,21 @@ depth_min = 0.
 depth_max = grid_dim * voxel_size + near_plane
 frustrum_depth = 2 * grid_dims[-1]
 
+batch_size = 4
+
 # Result logging directory
+tz = pytz.timezone("US/Eastern")
+d = datetime.datetime.now(tz)
 dir_name = os.path.join(
-    datetime.datetime.now().strftime('%m_%d'),
-    datetime.datetime.now().strftime('%H-%M-%S_') + '_'.join(opt.checkpoint.strip('/').split('/')[-2:]) + '_' + opt.data_root.strip('/').split('/')[-1]
+    d.strftime('%m_%d'),
+    d.strftime('%H-%M-%S_') + '_'.join(opt.checkpoint.strip('/').split('/')[-2:]) + '_' + opt.data_root.strip('/').split('/')[-1]
 )
 traj_dir = os.path.join(opt.logging_root, 'test_traj', dir_name)
 depth_dir = os.path.join(traj_dir, 'depth')
+runs_dir = os.path.join(opt.logging_root, "runs", dir_name)
 data_util.cond_mkdir(traj_dir)
 data_util.cond_mkdir(depth_dir)
+data_util.cond_mkdir(runs_dir)
 
 # Define DeepVoxel Model
 model = DeepVoxels(
@@ -89,10 +99,12 @@ projection = ProjectionHelper(
     near_plane = near_plane,
 )
 
+# Style Transfer Model
+stm = StyleTransferModel(opt.style_image_path)
 # Generating an image from trained checkpoint and projection file
 
 dataset = TestDataset(pose_dir=os.path.join(opt.data_root, 'pose'))
-dataloader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=4)
+dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
 
 custom_load(model, opt.checkpoint)
 for param in model.parameters():
@@ -109,95 +121,81 @@ print('Starting generation of images...')
 iter = 0
 depth_imgs = []
 
-for epoch in range(opt.num_iterations):
-    print(f"Epoch: {epoch}")
-    for trgt_pose in tqdm(dataloader):
-        start = time.time()
+writer = SummaryWriter(runs_dir, flush_secs=20)
 
-        trgt_pose = trgt_pose.squeeze().to(device)
-        # compute projection mapping
-        proj_mapping = projection.compute_proj_idcs(trgt_pose.squeeze(), grid_origin)
+# Add style image to writer
+style_image = Image.open(opt.style_image_path)
+style_image = np.array(style_image)[:, :, :3]
+style_image = style_image.transpose((2,0,1))
+writer.add_image("Style-Image", style_image, 0)
+
+# Utility function
+def get_images_from_poses(trgt_poses):
+    # Add some initial renderings of the network to writer
+    trgt_poses = trgt_poses.to(device)
+    proj_ind_3d = []
+    proj_ind_2d = []
+    for i in range(trgt_poses.shape[0]):
+        proj_mapping = projection.compute_proj_idcs(trgt_poses[i], grid_origin)
         if proj_mapping is None:
             print("Invalid sample")
             continue
+        proj_ind_3d.append(proj_mapping[0])
+        proj_ind_2d.append(proj_mapping[1])
+        
+    output, _ = model(
+        None,
+        proj_ind_3d,
+        proj_ind_2d,
+        None, None, None, dv
+    )
+    output = torch.cat(output)
+    return output
 
-        proj_ind_3d, proj_ind_2d = proj_mapping
+# Utility Function
+def normalize_images(imgs):
+    output_imgs = imgs + 0.5
+    output_imgs *= 255
+    output_imgs = output_imgs.round()
+    output_imgs = output_imgs.clamp(0, 255 - 1)
+    return output_imgs
 
-        output, depth_maps = model(
-            None,
-            [proj_ind_3d],
-            [proj_ind_2d],
-            None, None, None, dv
-        )
-        end = time.time()
-        forward_time += end - start
+# Utility Function
+def concate_images(images):
+    concatenated_images = torch.empty((3, opt.img_sidelength, batch_size*opt.img_sidelength))
+    for i in range(images.shape[0]):
+        concatenated_images[:, :, i*opt.img_sidelength:(i+1)*opt.img_sidelength] = images[i]
+    return concatenated_images
+    
+# Utility Function
+def invert_channels(image):
+    inv_index = torch.arange(image.size(0)-1, -1, -1).long()
+    return image[inv_index]
 
-        stm = StyleTransferModel(opt.style_image_path)
-        sf = stm.extract_style_features(output[0])
-        sl = stm.get_style_loss(sf)
-        sl.backward()
-
-        optimizer.step()
-        break
-
-overall_dv_change = torch.sum((dv.detach() - model.deepvoxels.detach())**2)
-print(overall_dv_change)
-
-# Now, generate some images using the updated deepvoxel!
-
-model.deepvoxels = dv.detach().clone()
-model.eval()
-
-print('Generating images with updated style...')
 with torch.no_grad():
-    iter = 0
-    depth_imgs = []
-    for trgt_pose in dataloader:
-        trgt_pose = trgt_pose.squeeze().to(device)
+    trgt_poses_indices = sample(range(len(dataset)), batch_size)
+    trgt_poses = torch.cat([dataset[i].unsqueeze(dim=0) for i in trgt_poses_indices])
+    output_images = get_images_from_poses(trgt_poses)
+    output_images = normalize_images(output_images.detach().cpu())
+    concatenated_images = concate_images(output_images)
+    concatenated_images = invert_channels(concatenated_images)
+    writer.add_image("Initial-Rendered-Images", concatenated_images, 0)
 
-        start = time.time()
-        # compute projection mapping
-        proj_mapping = projection.compute_proj_idcs(trgt_pose.squeeze(), grid_origin)
-        if proj_mapping is None:  # invalid sample
-            print('(invalid sample)')
-            continue
+# Train
+for epoch in range(opt.num_iterations):
+    print(f"Epoch: {epoch}")
+    for batch_num, trgt_poses in enumerate(tqdm(dataloader)):
+        output_images = get_images_from_poses(trgt_poses)
+        
+        style_features = stm.extract_style_features(output_images)
+        style_loss = stm.get_style_loss(style_features)
+        writer.add_scalar("Style-Loss", style_loss.item(), batch_num)
 
-        proj_ind_3d, proj_ind_2d = proj_mapping
-
-        # Run through model
-        output, depth_maps, = model(None,
-                                    [proj_ind_3d], [proj_ind_2d],
-                                    None, None,
-                                    None)
-        end = time.time()
-        forward_time += end - start
-
-        output[0] = output[0][:, :, 5:-5, 5:-5]
-        print("Iter %d" % iter)
-
-        output_img = np.array(output[0].squeeze().cpu().detach().numpy())
-        output_img = output_img.transpose(1, 2, 0)
-        output_img += 0.5
-        output_img *= 2 ** 16 - 1
-        output_img = output_img.round().clip(0, 2 ** 16 - 1)
-
-        depth_img = depth_maps[0].squeeze(0).cpu().detach().numpy()
-        depth_img = depth_img.transpose(1, 2, 0)
-        depth_imgs.append(depth_img)
-
-        cv2.imwrite(os.path.join(traj_dir, "img_%05d.png" % iter), output_img.astype(np.uint16)[:, :, ::-1])
-
-        iter += 1
-        break
-
-    depth_imgs = np.stack(depth_imgs, axis=0)
-    depth_imgs = (depth_imgs - np.amin(depth_imgs)) / (np.amax(depth_imgs) - np.amin(depth_imgs))
-    depth_imgs *= 2**16 - 1
-    depth_imgs = depth_imgs.round()
-
-    for i in range(len(depth_imgs)):
-        cv2.imwrite(os.path.join(depth_dir, "img_%05d.png" % i), depth_imgs[i].astype(np.uint16))
-
-print("Average forward pass time over %d examples is %f"%(iter, forward_time/iter))
-
-
+        style_loss.backward()
+        optimizer.step()
+        
+        writer.add_scalar("Overall-DV-SSE", torch.sum((dv.detach() - model.deepvoxels.detach())**2), batch_num)
+        output_images = normalize_images(output_images.detach().cpu())
+        concatenated_images = invert_channels(concate_images(output_images))
+        writer.add_image("Rendered-Images", concatenated_images, batch_num)
+writer.close()
