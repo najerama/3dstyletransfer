@@ -416,6 +416,10 @@ def nearest_neighbor_baseline(train_dir, test_dir, target_dir):
                        downsampling_order=1)[:,:,::-1]
         cv2.imwrite(os.path.join(target_dir, '%06d.png'%i), img)
 
+
+def get_device():
+    return torch.device("cuda:0")
+
 if __name__ == '__main__':
     # Adds noise to training poses.
     # data_root = '/home/vincent/data/deepvoxels/pedestal'

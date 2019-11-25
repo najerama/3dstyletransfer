@@ -18,6 +18,7 @@ from deepvoxels.deep_voxels import DeepVoxels
 from deepvoxels.util import parse_intrinsics, custom_load
 from deepvoxels import data_util
 from deepvoxel_style_transfer import StyleTransferModel
+import utils
 
 # Parse arguments
 parser = argparse.ArgumentParser()
@@ -28,11 +29,13 @@ parser.add_argument("--style_image_path", type=str, required=True)
 parser.add_argument("--num_iterations", type=int, required=True)
 parser.add_argument("--img_sidelength", type=int, default=512)
 parser.add_argument("--no_occlusion_net", action="store_true", default=False)
+parser.add_argument("--style_coeff", default=0.5, type=float)
+parser.add_argument("--content_coeff", default=0.5, type=float)
 opt = parser.parse_args()
 print("\n".join([f"({key}, {value})" for key, value in vars(opt).items()]))
 
 # Some constants
-device = torch.device("cuda")
+device = data_util.get_device()
 proj_image_dims = [64, 64]
 grid_dim = 32
 grid_dims = 3*[grid_dim]
@@ -56,7 +59,7 @@ depth_min = 0.
 depth_max = grid_dim * voxel_size + near_plane
 frustrum_depth = 2 * grid_dims[-1]
 
-batch_size = 4
+batch_size = 3
 
 # Result logging directory
 tz = pytz.timezone("US/Eastern")
@@ -82,6 +85,10 @@ model = DeepVoxels(
     nf0 = nf0,
     img_sidelength = input_image_dims[0],
 )
+custom_load(model, opt.checkpoint)
+for param in model.parameters():
+    param.requires_grad = False
+model.eval()
 model.to(device)
 
 # Project Module
@@ -100,19 +107,16 @@ projection = ProjectionHelper(
 )
 
 # Style Transfer Model
-stm = StyleTransferModel(opt.style_image_path)
+stm = StyleTransferModel()
 # Generating an image from trained checkpoint and projection file
 
 dataset = TestDataset(pose_dir=os.path.join(opt.data_root, 'pose'))
 dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
 
-custom_load(model, opt.checkpoint)
-for param in model.parameters():
-    param.requires_grad = True
-model.train()
-
 dv = model.deepvoxels.detach().clone()
 dv.requires_grad = True
+
+dv_orig = model.deepvoxels.detach().clone()
 
 optimizer = optim.Adam([dv])
 
@@ -124,13 +128,13 @@ depth_imgs = []
 writer = SummaryWriter(runs_dir, flush_secs=20)
 
 # Add style image to writer
-style_image = Image.open(opt.style_image_path)
-style_image = np.array(style_image)[:, :, :3]
-style_image = style_image.transpose((2,0,1))
-writer.add_image("Style-Image", style_image, 0)
+style_img = utils.load_rgb(opt.style_image_path, (opt.img_sidelength, opt.img_sidelength))
+writer.add_image("Input images src style", style_img+0.5, 0)
+style_img = np.expand_dims(style_img, axis=0)
+style_img = torch.tensor(style_img, device=device, dtype=torch.float)
 
 # Utility function
-def get_images_from_poses(trgt_poses):
+def get_images_from_poses(trgt_poses, dv):
     # Add some initial renderings of the network to writer
     trgt_poses = trgt_poses.to(device)
     proj_ind_3d = []
@@ -153,7 +157,7 @@ def get_images_from_poses(trgt_poses):
     return output
 
 # Utility Function
-def normalize_images(imgs):
+def denormalize_images(imgs):
     output_imgs = imgs + 0.5
     output_imgs *= 255
     output_imgs = output_imgs.round()
@@ -168,34 +172,50 @@ def concate_images(images):
     return concatenated_images
     
 # Utility Function
-def invert_channels(image):
-    inv_index = torch.arange(image.size(0)-1, -1, -1).long()
-    return image[inv_index]
+def invert_channels(images):
+    inv_index = torch.arange(images.size(1)-1, -1, -1).long()
+    return images[:, inv_index, :, :]
 
 with torch.no_grad():
     trgt_poses_indices = sample(range(len(dataset)), batch_size)
     trgt_poses = torch.cat([dataset[i].unsqueeze(dim=0) for i in trgt_poses_indices])
-    output_images = get_images_from_poses(trgt_poses)
-    output_images = normalize_images(output_images.detach().cpu())
+    output_images = get_images_from_poses(trgt_poses, dv_orig)
+    output_images = invert_channels(output_images)
+    output_images = denormalize_images(output_images.detach().cpu())
     concatenated_images = concate_images(output_images)
-    concatenated_images = invert_channels(concatenated_images)
     writer.add_image("Initial-Rendered-Images", concatenated_images, 0)
 
 # Train
+style_features_dst = stm.extract_style_features(style_img)
 for epoch in range(opt.num_iterations):
     print(f"Epoch: {epoch}")
     for batch_num, trgt_poses in enumerate(tqdm(dataloader)):
-        output_images = get_images_from_poses(trgt_poses)
+        optimizer.zero_grad()
         
-        style_features = stm.extract_style_features(output_images)
-        style_loss = stm.get_style_loss(style_features)
-        writer.add_scalar("Style-Loss", style_loss.item(), batch_num)
+        orig_images = get_images_from_poses(trgt_poses, dv_orig)
+        orig_images = invert_channels(orig_images)
+        content_features_dst = stm.extract_content_features(orig_images)
 
-        style_loss.backward()
+        output_images = get_images_from_poses(trgt_poses, dv)
+        output_images = invert_channels(output_images)
+        content_features_src = stm.extract_content_features(output_images)
+        style_features_src = stm.extract_style_features(output_images)
+
+        style_loss = stm.get_style_loss(style_features_src, style_features_dst)
+        content_loss = stm.get_content_loss(content_features_src, content_features_dst)
+        loss = (opt.style_coeff) * style_loss + (opt.content_coeff) * content_loss
+
+        loss.backward()
         optimizer.step()
         
+        batch_num += len(dataloader) * epoch
         writer.add_scalar("Overall-DV-SSE", torch.sum((dv.detach() - model.deepvoxels.detach())**2), batch_num)
-        output_images = normalize_images(output_images.detach().cpu())
-        concatenated_images = invert_channels(concate_images(output_images))
+        writer.add_scalars("Loss", {
+            "style loss(scaled)": style_loss.item() * opt.style_coeff, 
+            "content loss(scaled)": content_loss.item() * opt.content_coeff,
+            "ovearll loss": loss.item()
+        }, batch_num)
+        output_images = denormalize_images(output_images.detach().cpu())
+        concatenated_images = concate_images(output_images)
         writer.add_image("Rendered-Images", concatenated_images, batch_num)
 writer.close()

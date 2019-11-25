@@ -61,7 +61,7 @@ parser.add_argument('--near_plane', type=float, default=np.sqrt(3)/2,
 opt = parser.parse_args()
 print('\n'.join(["%s: %s" % (key, value) for key, value in vars(opt).items()]))
 
-device = torch.device('cuda')
+device = get_device()
 
 input_image_dims = [opt.img_sidelength, opt.img_sidelength]
 proj_image_dims = [64, 64] # Height, width of 2d feature map used for lifting and rendering.
