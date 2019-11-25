@@ -32,7 +32,7 @@ opt = parser.parse_args()
 print("\n".join([f"({key}, {value})" for key, value in vars(opt).items()]))
 
 # Some constants
-device = torch.device("cuda")
+device = data_util.get_device()
 proj_image_dims = [64, 64]
 grid_dim = 32
 grid_dims = 3*[grid_dim]

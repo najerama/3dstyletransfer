@@ -65,14 +65,16 @@ def compute_warp_idcs(cam_1_intrinsic,
                       img_1_depth,
                       img_2_pose,
                       img_2_depth):
-    cam_1_intrinsic = cam_1_intrinsic.squeeze().cuda()
-    cam_2_intrinsic = cam_2_intrinsic.squeeze().cuda()
+    device = data_util.get_device()
 
-    img_1_pose = img_1_pose.squeeze().cuda()
-    img_2_pose = img_2_pose.squeeze().cuda()
+    cam_1_intrinsic = cam_1_intrinsic.squeeze().cuda(device)
+    cam_2_intrinsic = cam_2_intrinsic.squeeze().cuda(device)
 
-    img_1_depth = img_1_depth.squeeze().cuda()
-    img_2_depth = img_2_depth.squeeze().cuda()
+    img_1_pose = img_1_pose.squeeze().cuda(device)
+    img_2_pose = img_2_pose.squeeze().cuda(device)
+
+    img_1_depth = img_1_depth.squeeze().cuda(device)
+    img_2_depth = img_2_depth.squeeze().cuda(device)
 
     # Get the new size
     side_length = img_1_depth.shape[0]
@@ -81,8 +83,8 @@ def compute_warp_idcs(cam_1_intrinsic,
     pixel_range = torch.arange(0, side_length)
     xx, yy = torch.meshgrid([pixel_range, pixel_range])
 
-    xx = xx.contiguous().view(-1).float().cuda()
-    yy = yy.contiguous().view(-1).float().cuda()
+    xx = xx.contiguous().view(-1).float().cuda(device)
+    yy = yy.contiguous().view(-1).float().cuda(device)
 
     img_1_cam_coords = backproject(yy,
                                    xx,

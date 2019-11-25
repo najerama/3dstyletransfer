@@ -6,6 +6,7 @@ from projection import *
 from custom_layers import *
 import functools
 import util
+from data_util import get_device
 
 from pytorch_prototyping.pytorch_prototyping import *
 
@@ -28,6 +29,8 @@ class DeepVoxels(nn.Module):
         :param use_occlusion_net: Whether to use the OcclusionNet or not.
         '''
         super().__init__()
+
+        self.device = get_device()
 
         self.use_occlusion_net = use_occlusion_net
         self.grid_dims = grid_dims
@@ -124,7 +127,7 @@ class DeepVoxels(nn.Module):
 
         coord_conv_volume = np.stack(coord_conv_volume, axis=0).astype(np.float32)
         coord_conv_volume = coord_conv_volume / self.grid_dims[0]
-        self.coord_conv_volume = torch.Tensor(coord_conv_volume).float().cuda()[None, :, :, :, :]
+        self.coord_conv_volume = torch.Tensor(coord_conv_volume).float().cuda(self.device)[None, :, :, :, :]
 
     def forward(self,
                 input_img,

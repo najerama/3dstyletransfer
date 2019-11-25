@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 
+from data_util import get_device
 
 class ProjectionHelper:
     def __init__(self,
@@ -171,19 +172,19 @@ class ProjectionHelper:
 
     def compute_proj_idcs(self, cam2world, grid2world):
         # Linear index into the frustrum
-        # lin_ind_frustrum = torch.arange(0, self.image_dims[0]*self.image_dims[1]*self.grid_dims[2]).long().cuda()
+        # lin_ind_frustrum = torch.arange(0, self.image_dims[0]*self.image_dims[1]*self.grid_dims[2]).long().cuda(self.device)
         world2grid = torch.inverse(grid2world)
 
         num_frust_elements = self.projection_image_dims[0] * self.projection_image_dims[1] * int(
             self.frustrum_depth)
-        lin_ind_frustrum = torch.arange(0, num_frust_elements).long().cuda()
+        lin_ind_frustrum = torch.arange(0, num_frust_elements).long().cuda(self.device)
 
         coords = cam2world.new(4, num_frust_elements)
 
         # Manually compute x-y-z voxel coordinates of volume
         coords[2] = lin_ind_frustrum / (self.projection_image_dims[0] * self.projection_image_dims[1])
         tmp = lin_ind_frustrum - (
-                    coords[2] * self.projection_image_dims[0] * self.projection_image_dims[1]).long().cuda()
+                    coords[2] * self.projection_image_dims[0] * self.projection_image_dims[1]).long().cuda(self.device)
         coords[1] = tmp / self.projection_image_dims[0]
         coords[0] = torch.remainder(tmp, self.projection_image_dims[0])
         coords[3].fill_(1)
@@ -221,16 +222,17 @@ class ProjectionHelper:
 
 def interpolate_lifting(image, lin_ind_3d, query_points, grid_dims):
     batch, num_feats, height, width = image.shape
+    device = get_device()
 
-    image = image.cuda()
-    lin_ind_3d = lin_ind_3d.cuda()
-    query_points = query_points.cuda()
+    image = image.cuda(device)
+    lin_ind_3d = lin_ind_3d.cuda(device)
+    query_points = query_points.cuda(device)
 
     x_indices = query_points[1, :]
     y_indices = query_points[0, :]
 
-    x0 = x_indices.floor().long().cuda()
-    y0 = y_indices.floor().long().cuda()
+    x0 = x_indices.floor().long().cuda(device)
+    y0 = y_indices.floor().long().cuda(device)
 
     x1 = (x0 + 1).long()
     y1 = (y0 + 1).long()
@@ -241,7 +243,7 @@ def interpolate_lifting(image, lin_ind_3d, query_points, grid_dims):
     x = x_indices - x0.float()
     y = y_indices - y0.float()
 
-    output = torch.zeros(1, num_feats, grid_dims[0] * grid_dims[1] * grid_dims[2]).cuda()
+    output = torch.zeros(1, num_feats, grid_dims[0] * grid_dims[1] * grid_dims[2]).cuda(device)
     output[:, :, lin_ind_3d] += image[:, :, x0, y0] * (1 - x) * (1 - y)
     output[:, :, lin_ind_3d] += image[:, :, x1, y0] * x * (1 - y)
     output[:, :, lin_ind_3d] += image[:, :, x0, y1] * (1 - x) * y
@@ -254,6 +256,7 @@ def interpolate_lifting(image, lin_ind_3d, query_points, grid_dims):
 
 def interpolate_trilinear(grid, lin_ind_frustrum, voxel_coords, img_shape, frustrum_depth):
     batch, num_feats, height, width, depth = grid.shape
+    device = get_device()
 
     lin_ind_frustrum = lin_ind_frustrum.long()
 
@@ -277,8 +280,8 @@ def interpolate_trilinear(grid, lin_ind_frustrum, voxel_coords, img_shape, frust
     y = y_indices - y0.float()
     z = z_indices - z0.float()
 
-    # output = torch.zeros(batch, num_feats, img_shape[0]*img_shape[1]*depth).cuda()
-    output = torch.zeros(batch, num_feats, img_shape[0] * img_shape[1] * frustrum_depth).cuda()
+    # output = torch.zeros(batch, num_feats, img_shape[0]*img_shape[1]*depth).cuda(device)
+    output = torch.zeros(batch, num_feats, img_shape[0] * img_shape[1] * frustrum_depth).cuda(device)
     # output[:, :, lin_ind_frustrum] += grid[:, :, x0, y0, z0] * (1 - x) * (1 - y) * (1 - z)
     # output[:, :, lin_ind_frustrum] += grid[:, :, x1, y0, z0] * x * (1 - y) * (1 - z)
     # output[:, :, lin_ind_frustrum] += grid[:, :, x0, y1, z0] * (1 - x) * y * (1 - z)

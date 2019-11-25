@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
 from pytorch_prototyping.pytorch_prototyping import *
+from data_util import get_device
 
 
 class FeatureExtractor(nn.Module):
@@ -91,6 +92,7 @@ class IntegrationNet(torch.nn.Module):
         super().__init__()
 
         self.coord_conv = coord_conv
+        self.device = get_device()
         if self.coord_conv:
             in_channels = nf0 + 3
         else:
@@ -142,7 +144,7 @@ class IntegrationNet(torch.nn.Module):
 
         coord_conv_volume = np.stack(coord_conv_volume, axis=0).astype(np.float32)
         coord_conv_volume = coord_conv_volume / grid_dim
-        self.coord_conv_volume = torch.Tensor(coord_conv_volume).float().cuda()[None, :, :, :, :]
+        self.coord_conv_volume = torch.Tensor(coord_conv_volume).float().cuda(self.device)[None, :, :, :, :]
         self.counter = 0
 
     def forward(self, new_observation, old_state, writer):
@@ -191,12 +193,13 @@ class OcclusionNet(nn.Module):
     '''
     def __init__(self, nf0, occnet_nf, frustrum_dims):
         super().__init__()
+        self.device = get_device()
 
         self.occnet_nf = occnet_nf
 
         self.frustrum_depth = frustrum_dims[-1]
         depth_coords = torch.arange(-self.frustrum_depth // 2,
-                                    self.frustrum_depth // 2)[None, None, :, None, None].float().cuda() / self.frustrum_depth
+                                    self.frustrum_depth // 2)[None, None, :, None, None].float().cuda(self.device) / self.frustrum_depth
         self.depth_coords = depth_coords.repeat(1, 1, 1, frustrum_dims[0], frustrum_dims[0])
 
         self.occlusion_prep = nn.Sequential(
@@ -212,7 +215,7 @@ class OcclusionNet(nn.Module):
                                     out_channels=self.occnet_nf,
                                     nf0=self.occnet_nf,
                                     num_down=num_down,
-                                    max_channels=4*self.occnet_nf,
+                                 max_channels=4*self.occnet_nf,
                                     outermost_linear=False)
 
         self.softmax_net = nn.Sequential(
