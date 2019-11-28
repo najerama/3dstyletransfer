@@ -157,33 +157,18 @@ def get_images_from_poses(trgt_poses, dv):
     return output
 
 # Utility Function
-def denormalize_images(imgs):
-    output_imgs = imgs + 0.5
-    output_imgs *= 255
-    output_imgs = output_imgs.round()
-    output_imgs = output_imgs.clamp(0, 255 - 1)
-    return output_imgs
-
-# Utility Function
 def concate_images(images):
     concatenated_images = torch.empty((3, opt.img_sidelength, batch_size*opt.img_sidelength))
     for i in range(images.shape[0]):
         concatenated_images[:, :, i*opt.img_sidelength:(i+1)*opt.img_sidelength] = images[i]
     return concatenated_images
     
-# Utility Function
-def invert_channels(images):
-    inv_index = torch.arange(images.size(1)-1, -1, -1).long()
-    return images[:, inv_index, :, :]
-
 with torch.no_grad():
     trgt_poses_indices = sample(range(len(dataset)), batch_size)
     trgt_poses = torch.cat([dataset[i].unsqueeze(dim=0) for i in trgt_poses_indices])
     output_images = get_images_from_poses(trgt_poses, dv_orig)
-    output_images = invert_channels(output_images)
-    output_images = denormalize_images(output_images.detach().cpu())
     concatenated_images = concate_images(output_images)
-    writer.add_image("Initial-Rendered-Images", concatenated_images, 0)
+    writer.add_image("Initial-Rendered-Images", concatenated_images + 0.5, 0)
 
 # Train
 style_features_dst = stm.extract_style_features(style_img)
@@ -193,11 +178,9 @@ for epoch in range(opt.num_iterations):
         optimizer.zero_grad()
         
         orig_images = get_images_from_poses(trgt_poses, dv_orig)
-        orig_images = invert_channels(orig_images)
         content_features_dst = stm.extract_content_features(orig_images)
 
         output_images = get_images_from_poses(trgt_poses, dv)
-        output_images = invert_channels(output_images)
         content_features_src = stm.extract_content_features(output_images)
         style_features_src = stm.extract_style_features(output_images)
 
@@ -215,7 +198,6 @@ for epoch in range(opt.num_iterations):
             "content loss(scaled)": content_loss.item() * opt.content_coeff,
             "ovearll loss": loss.item()
         }, batch_num)
-        output_images = denormalize_images(output_images.detach().cpu())
         concatenated_images = concate_images(output_images)
-        writer.add_image("Rendered-Images", concatenated_images, batch_num)
+        writer.add_image("Rendered-Images", concatenated_images + 0.5, batch_num)
 writer.close()

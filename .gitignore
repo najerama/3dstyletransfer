@@ -112,3 +112,4 @@ deepvoxels-data/synthetic_scene/*
 setup.sh
 useful_scripts.sh
 .vscode/*
+*/*.un~
