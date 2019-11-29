@@ -12,12 +12,14 @@ from tensorboardX import SummaryWriter
 from PIL import Image
 from random import sample
 import pytz
+import torchvision.transforms as transforms
 from deepvoxels.projection import ProjectionHelper
 from deepvoxels.dataio import TestDataset
 from deepvoxels.deep_voxels import DeepVoxels
 from deepvoxels.util import parse_intrinsics, custom_load
 from deepvoxels import data_util
 from deepvoxel_style_transfer import StyleTransferModel
+from deepvoxel_style_transfer_2 import StyleTransferModel2
 import utils
 
 # Parse arguments
@@ -106,8 +108,6 @@ projection = ProjectionHelper(
     near_plane = near_plane,
 )
 
-# Style Transfer Model
-stm = StyleTransferModel()
 # Generating an image from trained checkpoint and projection file
 
 dataset = TestDataset(pose_dir=os.path.join(opt.data_root, 'pose'))
@@ -126,12 +126,6 @@ iter = 0
 depth_imgs = []
 
 writer = SummaryWriter(runs_dir, flush_secs=20)
-
-# Add style image to writer
-style_img = utils.load_rgb(opt.style_image_path, (opt.img_sidelength, opt.img_sidelength))
-writer.add_image("Input images src style", style_img+0.5, 0)
-style_img = np.expand_dims(style_img, axis=0)
-style_img = torch.tensor(style_img, device=device, dtype=torch.float)
 
 # Utility function
 def get_images_from_poses(trgt_poses, dv):
@@ -162,42 +156,66 @@ def concate_images(images):
     for i in range(images.shape[0]):
         concatenated_images[:, :, i*opt.img_sidelength:(i+1)*opt.img_sidelength] = images[i]
     return concatenated_images
-    
+
+
+loader = transforms.Compose([
+    transforms.Resize((opt.img_sidelength, opt.img_sidelength)),
+    transforms.ToTensor()]
+)
+style_img = utils.image_loader(opt.style_image_path, loader, device)
+writer.add_image("Input images src style", style_img[0], 0)
+
+# Dummy Content Image
 with torch.no_grad():
     trgt_poses_indices = sample(range(len(dataset)), batch_size)
     trgt_poses = torch.cat([dataset[i].unsqueeze(dim=0) for i in trgt_poses_indices])
     output_images = get_images_from_poses(trgt_poses, dv_orig)
     concatenated_images = concate_images(output_images)
     writer.add_image("Initial-Rendered-Images", concatenated_images + 0.5, 0)
+content_img = output_images[0] + 0.5
+content_img = content_img.unsqueeze(0)
+stm = StyleTransferModel2(content_img, style_img)
 
 # Train
-style_features_dst = stm.extract_style_features(style_img)
 for epoch in range(opt.num_iterations):
     print(f"Epoch: {epoch}")
     for batch_num, trgt_poses in enumerate(tqdm(dataloader)):
         optimizer.zero_grad()
         
-        orig_images = get_images_from_poses(trgt_poses, dv_orig)
-        content_features_dst = stm.extract_content_features(orig_images)
-
         output_images = get_images_from_poses(trgt_poses, dv)
-        content_features_src = stm.extract_content_features(output_images)
-        style_features_src = stm.extract_style_features(output_images)
-
-        style_loss = stm.get_style_loss(style_features_src, style_features_dst)
-        content_loss = stm.get_content_loss(content_features_src, content_features_dst)
-        loss = (opt.style_coeff) * style_loss + (opt.content_coeff) * content_loss
-
+        output_images = output_images + 0.5
+        style_loss = 0
+        content_loss = 0
+        for i in range(output_images.shape[0]):
+            ss, cs = stm.get_loss(output_images[i].unsqueeze(0))
+            style_loss = stylez_loss + ss
+            content_loss = content_loss + cs
+        style_loss = (style_loss * opt.style_coeff) / output_images.shape[0]
+        content_loss = (content_loss * opt.content_coeff) / output_images.shape[0]
+        loss = style_loss + content_loss
         loss.backward()
+        print(output_images.grad)
         optimizer.step()
+
+        # content_features_dst = stm.extract_content_features(orig_images)
+
+        # output_images = get_images_from_poses(trgt_poses, dv)
+        # content_features_src = stm.extract_content_features(output_images)
+        # style_features_src = stm.extract_style_features(output_images)
+
+        # style_loss = stm.get_style_loss(style_features_src, style_features_dst)
+        # content_loss = stm.get_content_loss(content_features_src, content_features_dst)
+        # loss = (opt.style_coeff) * style_loss + (opt.content_coeff) * content_loss
+
+        # loss.backward()
         
         batch_num += len(dataloader) * epoch
         writer.add_scalar("Overall-DV-SSE", torch.sum((dv.detach() - model.deepvoxels.detach())**2), batch_num)
         writer.add_scalars("Loss", {
-            "style loss(scaled)": style_loss.item() * opt.style_coeff, 
-            "content loss(scaled)": content_loss.item() * opt.content_coeff,
+            "style loss(scaled)": style_loss.item(), 
+            "content loss(scaled)": content_loss.item(),
             "ovearll loss": loss.item()
         }, batch_num)
         concatenated_images = concate_images(output_images)
-        writer.add_image("Rendered-Images", concatenated_images + 0.5, batch_num)
+        writer.add_image("Rendered-Images", concatenated_images, batch_num)
 writer.close()
