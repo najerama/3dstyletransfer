@@ -7,6 +7,12 @@ import argparse
 from tqdm import tqdm
 import os
 from tensorboardX import SummaryWriter
+from torchvision import transforms
+
+import sys
+sys.path.insert(0, "/local/crv/sa3762/Dev/3dstyletransfer/")
+sys.path.insert(0, "/local/crv/sa3762/Dev/3dstyletransfer/deepvoxels/")
+
 from deepvoxels.util import custom_load 
 from deepvoxels import data_util
 import utils
@@ -26,28 +32,57 @@ class StyleTransferModel:
                 parameters.requires_grad = False    
         self.feature_layers = [3, 8, 15, 22]
 
-    def extract_style_features(self, images):
+    def extract_raw_features(self, images):
+        features = []
         out = images
-        results = []
         for i, l in enumerate(self.style_model):
             out = l(out)
             if i in self.feature_layers:
-                feat = out
-                feat = feat.permute((0,2,3,1))
-                feat = feat.reshape((feat.shape[0], -1, feat.shape[-1]))
-                feat_transpose = torch.transpose(feat, 2, 1)
-                feat1 = torch.matmul(feat_transpose, feat)
-                results.append(feat1)
-        return results
+                features.append(out)
+        return features
 
-    def extract_content_features(self, images):
-        out = images
-        results = []
-        for i, l in enumerate(self.style_model):
-            out = l(out)
-            if i in self.feature_layers:
-                results.append(out)
-        return results
+    def extract_style_features(self, images, masks):
+        """
+        images: [B, C, H, W]. Values between [-0.5, 0.5] obtained after mean, var normalized per channel
+        masks: [B, H, W]. Values {0, 1}
+        """        
+        if masks is None:
+            masks = torch.ones((images.shape[0], images.shape[2], images.shape[3]), device = self.device, dtype=torch.float)
+        features = self.extract_raw_features(images)
+
+        # Extract style matrices for each layer's features
+        style_features = []
+        for feature in features:  # [B, Cp, Hp, Wp]
+            scale = int(masks.shape[-1] / feature.shape[-1])
+            m = torch.nn.functional.avg_pool2d(masks[:, None, :, :], kernel_size=scale, stride=scale)
+            dim = feature.shape[1]  # Number of feature channels Cp
+            m = m.view((m.shape[0], -1))  # [B, H*W]
+            f2 = feature.permute(0, 2, 3, 1)  # [B, Hp, Wp, Cp]
+            f2 = f2.view((f2.shape[0], -1, f2.shape[-1]))  # [B, Hp*Wp, Cp]
+            f2 = f2 * torch.sqrt(m)[:, :, None]  # Multiply mask to each channel.
+            f2 = torch.matmul(f2.permute(0, 2, 1), f2)  # [B, Cp, Cp]
+            f2 = f2 / (dim * m.sum(dim=1)[:, None, None])  # Normalize
+            style_features.append(f2)
+        return style_features
+
+    def extract_content_features(self, images, masks):
+        """
+        images: [B, C, H, W]; [-0.5, 0.5]
+        masks: [B, H, W]; {0, 1}
+        """
+        if masks is None:
+            masks = torch.ones((images.shape[0], images.shape[2], images.shape[3]), device = self.device, dtype=torch.float)
+        
+        features = self.extract_raw_features(images)
+
+        content_features = []
+        for feature in features:  # [B, Cp, Hp, Wp]
+            scale = int(masks.shape[-1] / feature.shape[-1])
+            m = torch.nn.functional.avg_pool2d(masks[:, None, :, :], kernel_size=scale, stride=scale)  # [B, 1, Hp, Wp]
+
+            feature = feature * m
+            content_features.append(feature)        
+        return content_features
 
     def get_loss(self, feat, feat_ref):
         loss  = [torch.sum((f-fr)**2) for f, fr in zip(feat, feat_ref)]
@@ -63,6 +98,7 @@ class StyleTransferModel:
 
     def get_content_loss(self, feat_src, feat_dst):
         return self.get_loss(feat_src, feat_dst)
+
 
 
 if __name__ == "__main__":
@@ -84,34 +120,55 @@ if __name__ == "__main__":
     img_size = (512, 512)
     device = data_util.get_device()
 
-    # Load Images
-    src_img = utils.load_rgb(args.src_img_path, img_size)
-    style_img = utils.load_rgb(args.style_img_path, img_size)
-    writer.add_image("Input images src style", np.concatenate((src_img, style_img), axis=-1)+0.5, 0)
+    mean = torch.tensor([0.485, 0.456, 0.406], device=device, dtype=torch.float)[None, :, None, None]
+    std = torch.tensor([0.229, 0.224, 0.225], device=device, dtype=torch.float)[None, :, None, None]
+    # normalize = transforms.Normalize(mean=mean, std=std)
 
-    # Prepare Images
-    src_img = np.expand_dims(src_img, axis=0)
-    src_img = torch.tensor(src_img, device=device, dtype=torch.float)
-    style_img = np.expand_dims(style_img, axis=0)
-    style_img = torch.tensor(style_img, device=device, dtype=torch.float)
+    def normalize(images):
+        return (images - mean) / std
+
+    def denormalize(images):
+        return images * std + mean
     
+    def get_white_region_mask(images):
+        """
+            images: [B, C, H, W] in range [0, 1]
+        """
+        mask = (images > 0.999)
+        mask = mask.all(dim=1)
+        return mask.type_as(images)    
+    
+    # Load Images
+    src_img = torch.tensor(utils.load_rgb(args.src_img_path, img_size), device=device, dtype=torch.float) + 0.5
+    src_img = src_img.unsqueeze(dim=0)
+    src_mask = get_white_region_mask(src_img)
+    src_img = normalize(src_img)
+    writer.add_image("Source Mask", src_mask, 0)
+
+    style_img = torch.tensor(utils.load_rgb(args.style_img_path, img_size), device=device, dtype=torch.float) + 0.5
+    style_img = style_img.unsqueeze(dim=0)
+    style_img = normalize(style_img)
+    writer.add_image("Input images src style", denormalize(torch.cat((src_img[0], style_img[0]), dim=-1)), 0)
+
     stm = StyleTransferModel()
-    style_features = stm.extract_style_features(style_img)
-    content_features = stm.extract_content_features(src_img)
+    style_features = stm.extract_style_features(style_img, None)
+    content_features = stm.extract_content_features(src_img, src_mask)
 
     src_img.requires_grad = True
-    optimizer = torch.optim.Adam([src_img])
+    optimizer = torch.optim.Adam([src_img], lr=0.01)
     
     for num_iter in tqdm(range(args.num_iters)):
         optimizer.zero_grad()
-        sf = stm.extract_style_features(src_img)
+        sf = stm.extract_style_features(src_img, src_mask)
         sl = stm.get_style_loss(sf, style_features)
 
-        cf = stm.extract_content_features(src_img)
+        cf = stm.extract_content_features(src_img, src_mask)
         cl = stm.get_content_loss(cf, content_features)
 
-        l = (args.style_coeff) * sl + (args.content_coeff) * cl
+        # l = (args.style_coeff) * sl + (args.content_coeff) * cl
+        l = sl
         l.backward()
+        # src_img.grad = src_img.grad * src_mask
         optimizer.step()
         if num_iter%10:
             writer.add_scalars("Loss", {
@@ -119,4 +176,4 @@ if __name__ == "__main__":
                 "content loss(scaled)": cl.item() * args.content_coeff,
                 "ovearll loss": l.item()
             }, num_iter)
-            writer.add_image("Style Transfer Image", src_img+0.5, num_iter)
+            writer.add_image("Style Transfer Image", denormalize(src_img), num_iter)
