@@ -71,6 +71,11 @@ class ProjectionHelper:
         corner_points[7][:3] = self.depth_to_skeleton(0, self.lifting_image_dims[1] - 1, self.depth_max).unsqueeze(1)
 
         # Transform to world coordinates
+        try:
+            p = torch.bmm(camera_to_world.repeat(8, 1, 1), corner_points)
+        except Exception as e:
+            pass
+            
         p = torch.bmm(camera_to_world.repeat(8, 1, 1), corner_points)
         # Transform to grid coordinates (grid at origin)
         pl = torch.round(torch.bmm(world_to_grid.repeat(8, 1, 1), torch.floor(p)))
