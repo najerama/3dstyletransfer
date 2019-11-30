@@ -61,8 +61,6 @@ depth_min = 0.
 depth_max = grid_dim * voxel_size + near_plane
 frustrum_depth = 2 * grid_dims[-1]
 
-batch_size = 3
-
 # Result logging directory
 tz = pytz.timezone("US/Eastern")
 d = datetime.datetime.now(tz)
@@ -88,8 +86,8 @@ model = DeepVoxels(
     img_sidelength = input_image_dims[0],
 )
 custom_load(model, opt.checkpoint)
-for param in model.parameters():
-    param.requires_grad = False
+# for param in model.parameters():
+#     param.requires_grad = False
 model.eval()
 model.to(device)
 
@@ -108,23 +106,14 @@ projection = ProjectionHelper(
     near_plane = near_plane,
 )
 
-# Generating an image from trained checkpoint and projection file
-
 dataset = TestDataset(pose_dir=os.path.join(opt.data_root, 'pose'))
-dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
+trgt_pose = dataset[sample(range(len(dataset)), 1)[0]]
 
 dv = model.deepvoxels.detach().clone()
 dv.requires_grad = True
-
 dv_orig = model.deepvoxels.detach().clone()
 
-optimizer = optim.Adam([dv])
-
-forward_time = 0.
-print('Starting generation of images...')
-iter = 0
-depth_imgs = []
-
+optimizer = optim.Adam([dv], lr=0.01)
 writer = SummaryWriter(runs_dir, flush_secs=20)
 
 # Utility function
@@ -150,60 +139,41 @@ def get_images_from_poses(trgt_poses, dv):
     output = torch.cat(output)
     return output
 
-# Utility Function
-def concate_images(images):
-    concatenated_images = torch.empty((3, opt.img_sidelength, batch_size*opt.img_sidelength))
-    for i in range(images.shape[0]):
-        concatenated_images[:, :, i*opt.img_sidelength:(i+1)*opt.img_sidelength] = images[i]
-    return concatenated_images
-
 
 loader = transforms.Compose([
     transforms.Resize((opt.img_sidelength, opt.img_sidelength)),
     transforms.ToTensor()]
 )
+
 style_img = utils.image_loader(opt.style_image_path, loader, device)
 writer.add_image("Input images src style", style_img[0], 0)
 
 # Dummy Content Image
 with torch.no_grad():
-    trgt_poses_indices = sample(range(len(dataset)), batch_size)
-    trgt_poses = torch.cat([dataset[i].unsqueeze(dim=0) for i in trgt_poses_indices])
-    output_images = get_images_from_poses(trgt_poses, dv_orig)
-    concatenated_images = concate_images(output_images)
-    writer.add_image("Initial-Rendered-Images", concatenated_images + 0.5, 0)
-content_img = output_images[0] + 0.5
+    output_image = get_images_from_poses(trgt_pose.unsqueeze(0), dv_orig).squeeze(0)
+    writer.add_image("Initial-Rendered-Images", output_image + 0.5, 0)
+content_img = output_image + 0.5
 content_img = content_img.unsqueeze(0)
 stm = StyleTransferModel2(content_img, style_img)
 
 # Train
-for epoch in range(opt.num_iterations):
-    print(f"Epoch: {epoch}")
-    for batch_num, trgt_poses in enumerate(tqdm(dataloader)):
-        optimizer.zero_grad()
-        
-        output_images = get_images_from_poses(trgt_poses, dv)
-        output_images = output_images + 0.5
-        style_loss = 0
-        content_loss = 0
-        for i in range(output_images.shape[0]):
-            ss, cs = stm.get_loss(output_images[i].unsqueeze(0))
-            style_loss = stylez_loss + ss
-            content_loss = content_loss + cs
-        style_loss = (style_loss * opt.style_coeff) / output_images.shape[0]
-        content_loss = (content_loss * opt.content_coeff) / output_images.shape[0]
-        loss = style_loss + content_loss
-        loss.backward()
-        print(output_images.grad)
-        optimizer.step()
-        
-        batch_num += len(dataloader) * epoch
-        writer.add_scalar("Overall-DV-SSE", torch.sum((dv.detach() - model.deepvoxels.detach())**2), batch_num)
-        writer.add_scalars("Loss", {
-            "style loss(scaled)": style_loss.item(), 
-            "content loss(scaled)": content_loss.item(),
-            "ovearll loss": loss.item()
-        }, batch_num)
-        concatenated_images = concate_images(output_images)
-        writer.add_image("Rendered-Images", concatenated_images, batch_num)
+trgt_pose = trgt_pose.unsqueeze(0)
+for epoch in tqdm(range(opt.num_iterations)):
+    # for batch_num, trgt_poses in enumerate(tqdm(dataloader)):
+    optimizer.zero_grad()
+    
+    output_images = get_images_from_poses(trgt_pose, dv)
+    output_images = output_images + 0.5
+    style_loss, content_loss = stm.get_loss(output_images)
+    loss = style_loss * opt.style_coeff + content_loss * opt.content_coeff
+    loss.backward()
+    optimizer.step()
+    
+    writer.add_scalar("Overall-DV-SSE", torch.sum((dv.detach() - model.deepvoxels.detach())**2), epoch)
+    writer.add_scalars("Loss", {
+        "style loss(scaled)": style_loss.item() * opt.style_coeff, 
+        "content loss(scaled)": content_loss.item() * opt.content_coeff,
+        "ovearll loss": loss.item()
+    }, epoch)
+    writer.add_image("Rendered-Image", output_images[0], epoch)
 writer.close()
