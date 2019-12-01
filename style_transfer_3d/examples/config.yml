@@ -1,8 +1,8 @@
 ## Specify a list of content files (c) and a list of style files (s), then it will execute a run c x d files and return | time for execution | style loss | content loss | tv loss
 
 
-content_fns : [bunny,teapot]
-style_fns : [simpsons1,fungai1,perry1,new_york1,lichtenstein1]
+content_fns : [sofachair]
+style_fns : [hokusai1,monet5,monet6,gogh2]
 data_dir : ./examples/data
 
 out_dir : ./examples/results
