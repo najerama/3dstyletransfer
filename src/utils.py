@@ -2,6 +2,8 @@ import pytz
 import datetime
 import os
 import numpy as np
+import torch
+from PIL import Image
 from deepvoxels import data_util
 
 def get_log_dir():
@@ -17,3 +19,8 @@ def load_rgb(path, img_size):
     img = img[:, :, :3].astype(np.float32) / 255. - 0.5
     img = img.transpose(2,0,1)
     return img
+
+def image_loader(image_name, transforms, device):
+    image = Image.open(image_name)
+    image = transforms(image).unsqueeze(0)
+    return image.to(device, torch.float)
