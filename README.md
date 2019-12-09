@@ -5,4 +5,4 @@ Recent years have seen progress in applying machine learning techniques to devel
 However, little work has been done in transforming these underlying 3D structures in meaningful ways. Can we, for instance, apply a new floral pattern to a 3D model of shape? We aim to explore the style transfer of a 2D image upon latent 3D models for novel view synthesis.
 
 
-![](misc/3d style transfer poster.pdf)
+![](./misc/armchair_perry.gif)![](./misc/armchair_vg.gif)
