@@ -4,7 +4,7 @@ Recent years have seen progress in applying machine learning techniques to devel
 
 However, little work has been done in transforming these underlying 3D structures in meaningful ways. Can we, for instance, apply a new floral pattern to a 3D model of shape? We aim to explore the style transfer of a 2D image upon latent 3D models for novel view synthesis.
 
-4 main contributions of our wor: 
+4 main contributions of our work: 
   1. We define a hardness scale for 3D Style Transfer for a dataset of 50 images 
   2. We extend Neural Meshes to ShapeNet's objects for future standardized research 
   3. We quantify loss with 3D style transfer network to backpropogate style features onto the underlying 3d scene representation. 
