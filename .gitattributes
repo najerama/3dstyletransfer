@@ -1,0 +1,2 @@
+*.scala linguist-detectable=false
+*.js linguist-detectable=true
